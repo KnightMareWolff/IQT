@@ -1,6 +1,6 @@
 # IQT: Insane Queue & Task
 
-![IQT Logo - Insane Queue & Task](https://insaneframework.com/wp-content/uploads/2025/08/LogoIQT-300x140.png) <!-- Replace with your actual logo image URL -->
+![IQT Logo - Insane Queue & Task](https://insaneframework.com/wp-content/uploads/2025/08/LogoIQT-300x140.png)
 
 IQT (Insane Queue & Task) is a robust, high-performance, and incredibly reliable queuing and task management system designed to handle asynchronous operations and background processes with unmatched efficiency. Part of the "Insane" suite of tools (alongside IVR and IAR), IQT empowers developers to build highly scalable and responsive applications by offloading heavy computational tasks, ensuring seamless execution even under extreme load.
 
@@ -22,82 +22,111 @@ In today's fast-paced digital world, applications need to be agile, responsive, 
 *   **Optimizing Resource Usage:** Efficiently distribute workloads across your infrastructure, preventing bottlenecks and maximizing throughput.
 *   **Simplifying Complex Workflows:** Break down large, monolithic tasks into smaller, manageable units that can be processed asynchronously.
 
-## 🛠️ Getting Started (Conceptual)
+## 🛠️ Getting Started (Conceptual with Unreal Engine C++)
 
-While implementation details would vary based on the specific technology stack (e.g., programming language, database, message broker), the general workflow with IQT would involve:
+For Unreal Engine developers, IQT would integrate seamlessly into your C++ projects, allowing you to offload heavy computations or long-running tasks to background queues, preventing hitches on your game thread.
 
-1.  **Defining Tasks:** Create clear, self-contained units of work.
-2.  **Enqueuing Tasks:** Send tasks to the IQT queue from your application's main thread.
-3.  **Processing Tasks:** Have dedicated workers or consumers pick up tasks from the queue and execute them asynchronously.
-4.  **Monitoring (Optional):** Keep an eye on queue depth, task status, and worker performance.
+Here's a conceptual example demonstrating how you might define and enqueue a task within an Unreal Engine application:
 
-```java
-// Conceptual example (not functional code, illustrating the idea)
+```cpp
+// 1. Define your task data (payload) using a USTRUCT
+//    This allows easy passing of parameters for your task.
+USTRUCT(BlueprintType)
+struct FIQTImageProcessTaskData
+{
+    GENERATED_BODY()
 
-// 1. Define a Task Interface or Base Class
-public interface IQTTask {
-    void execute();
-    String getTaskId(); // For tracking purposes
-}
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Tasks")
+    FString ImagePath;
 
-// 2. Implement Specific Tasks
-public class ProcessImageTask implements IQTTask {
-    private String imageUrl;
-    private String filterType;
-    private String taskId; // Unique ID for this task instance
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Tasks")
+    FString FilterType;
 
-    public ProcessImageTask(String imageUrl, String filterType) {
-        this.imageUrl = imageUrl;
-        this.filterType = filterType;
-        this.taskId = "IMG_" + System.currentTimeMillis(); // Simple ID generation
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Tasks")
+    int32 QualitySetting;
+};
+
+// 2. Define a conceptual IQT management class (e.g., a UGameInstanceSubsystem)
+//    This provides global access to your IQT system for enqueuing tasks.
+UCLASS()
+class UMyIQTSubsystem : public UGameInstanceSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    // Conceptual method to enqueue a task
+    // TaskFunction: A TFunction<void()> representing the actual work to be done.
+    // TaskData: The specific data payload for this task.
+    void EnqueueIQTTask(TFunction<void()> TaskFunction, const FIQTImageProcessTaskData& TaskData)
+    {
+        // In a real IQT implementation:
+        // - TaskData would be serialized and sent to a message queue (e.g., RabbitMQ, Kafka).
+        // - TaskFunction (or a reference to it) would be handled by a worker pool.
+        // - Workers (separate threads/processes) would dequeue tasks and execute TaskFunction.
+
+        UE_LOG(LogTemp, Log, TEXT("IQT: Enqueuing task for image '%s' with filter '%s'"),
+               *TaskData.ImagePath, *TaskData.FilterType);
+
+        // For demonstration, we'll simulate immediate execution or a simple async call within Unreal.
+        // In a real IQT, this would trigger robust background processing across your system.
+        Async(EAsyncExecution::Thread, TaskFunction);
     }
+};
 
-    @Override
-    public void execute() {
-        System.out.println("Processing image: " + imageUrl + " with filter: " + filterType);
-        // Simulate image processing
-        try {
-            Thread.sleep(2000); // Simulate work
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+// 3. Enqueuing a task from an Unreal Actor or Blueprint Callable function
+//    This shows how you'd trigger a background operation from your game logic.
+UCLASS()
+class AMyGameActor : public AActor
+{
+    GENERATED_BODY()
+
+public:
+    AMyGameActor() {}
+
+    UFUNCTION(BlueprintCallable, Category = "My Game")
+    void TriggerImageProcessingTask(const FString& ImagePath, const FString& Filter)
+    {
+        // Get the IQT Subsystem from the current Game Instance
+        UMyIQTSubsystem* IQTSubsystem = GetGameInstance()->GetSubsystem<UMyIQTSubsystem>();
+        if (IQTSubsystem)
+        {
+            // Prepare the data for our image processing task
+            FIQTImageProcessTaskData TaskData;
+            TaskData.ImagePath = ImagePath;
+            TaskData.FilterType = Filter;
+            TaskData.QualitySetting = 90;
+
+            // Define the actual heavy work as a lambda function.
+            // This lambda will be executed on a background thread by IQT.
+            auto ImageProcessingLogic = [TaskData]()
+            {
+                // --- THIS CODE RUNS ON A BACKGROUND THREAD MANAGED BY IQT ---
+                UE_LOG(LogTemp, Log, TEXT("IQT Worker: Starting image processing for '%s' with filter '%s'"),
+                       *TaskData.ImagePath, *TaskData.FilterType);
+
+                // Simulate a heavy, long-running operation (e.g., resizing, applying complex filters, disk I/O)
+                FPlatformProcess::Sleep(3.0f); // Simulate 3 seconds of work
+
+                UE_LOG(LogTemp, Log, TEXT("IQT Worker: Finished image processing for '%s'"),
+                       *TaskData.ImagePath);
+
+                // If results need to be visible or used on the game thread (e.g., update UI, load new texture):
+                // You would typically dispatch a callback or event back to the game thread.
+                // FSimpleDelegate::CreateLambda([TaskData]() {
+                //     // This lambda runs on the game thread (main thread)
+                //     UE_LOG(LogTemp, Log, TEXT("IQT Game Thread Callback: Image '%s' processing complete, updating UI."), *TaskData.ImagePath);
+                //     // Example: UTexture2D* NewTexture = LoadTextureFromDisk(TaskData.ImagePath);
+                //     // Example: UMyGameWidget->UpdateImage(NewTexture);
+                // }).ExecuteIfBound();
+            };
+
+            // Enqueue the task with IQT
+            IQTSubsystem->EnqueueIQTTask(ImageProcessingLogic, TaskData);
+            UE_LOG(LogTemp, Warning, TEXT("Image processing task enqueued successfully!"));
         }
-        System.out.println("Finished processing image: " + imageUrl);
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("IQT Subsystem not found! Make sure it's initialized."));
+        }
     }
-
-    @Override
-    public String getTaskId() {
-        return taskId;
-    }
-}
-
-// 3. Enqueue Tasks (from your application's main logic)
-public class ApplicationMain {
-    public static void main(String[] args) {
-        // Assume IQT is initialized and running
-        // IQT.getQueue().enqueue(new ProcessImageTask("example.com/pic1.jpg", "grayscale"));
-        // IQT.getQueue().enqueue(new ProcessImageTask("example.com/pic2.jpg", "sepia"));
-        System.out.println("Tasks enqueued for IQT processing.");
-    }
-}
-
-// 4. Task Worker (a separate process or thread that consumes tasks)
-public class IQTWorker {
-    public void start() {
-        System.out.println("IQT Worker started, waiting for tasks...");
-        // This loop would typically run indefinitely
-        // while (true) {
-        //     IQTTask task = IQT.getQueue().dequeue(); // Get next task
-        //     if (task != null) {
-        //         System.out.println("Worker executing task: " + task.getTaskId());
-        //         task.execute(); // Execute the task
-        //     } else {
-        //         try {
-        //             Thread.sleep(1000); // Wait if no tasks
-        //         } catch (InterruptedException e) {
-        //             Thread.currentThread().interrupt();
-        //             break;
-        //         }
-        //     }
-        // }
-    }
-}
+};
