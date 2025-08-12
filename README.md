@@ -1,6 +1,6 @@
 # IQT: Insane Queue & Task
 
-![IQT Logo - Insane Queue & Task]([https://i.imgur.com/your-iqt-logo-image.png](https://insaneframework.com/wp-content/uploads/2025/08/LogoIQT-300x140.png)} <!-- Replace with your actual logo image URL -->
+![IQT Logo - Insane Queue & Task](https://insaneframework.com/wp-content/uploads/2025/08/LogoIQT-300x140.png) <!-- Replace with your actual logo image URL -->
 
 IQT (Insane Queue & Task) is a robust, high-performance, and incredibly reliable queuing and task management system designed to handle asynchronous operations and background processes with unmatched efficiency. Part of the "Insane" suite of tools (alongside IVR and IAR), IQT empowers developers to build highly scalable and responsive applications by offloading heavy computational tasks, ensuring seamless execution even under extreme load.
 
