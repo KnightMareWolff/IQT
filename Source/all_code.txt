@@ -1,0 +1,1400 @@
+﻿
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT.cpp ---
+// IQT/Source/IQT/Private/IQT.cpp
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#include "CoreMinimal.h"
+#include "Modules/ModuleManager.h"
+
+/**
+ * FIQTModule: Main module class for the IQT plugin.
+ * This class implements the IModuleInterface and is responsible for
+ * handling module startup and shutdown.
+ */
+class FIQTModule : public IModuleInterface
+{
+public:
+    /** IModuleInterface implementation */
+    virtual void StartupModule() override
+    {
+        // This code will execute after your module is loaded into memory;
+        // the exact timing is specified in the .uplugin file per-module
+        UE_LOG(LogTemp, Log, TEXT("IQT Module: StartupModule called. IQT Plugin is initializing."));
+    }
+
+    virtual void ShutdownModule() override
+    {
+        // This function may be called during shutdown to clean up your module.
+        // For modules that are dynamically unloaded, we must clean up anything that was loaded.
+        UE_LOG(LogTemp, Log, TEXT("IQT Module: ShutdownModule called. IQT Plugin is shutting down."));
+    }
+};
+
+// This macro implements the module.
+// The first parameter is the name of your module (as defined in IQT.Build.cs).
+// The second parameter is the class that implements IModuleInterface.
+IMPLEMENT_MODULE(FIQTModule, IQT);
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT.cpp ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT_Queue.cpp ---
+// IQT/Source/IQT/Private/IQT_Queue.cpp
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#include "IQT_Queue.h" 
+// NOTA: "Internal/IQT_PriorityQueueInternal.h" AGORA É INCLUÍDO DIRETAMENTE EM "IQT_Queue.h" para resolver o TUniquePtr
+// A linha abaixo foi comentada pois o include já está no .h do UIQT_Queue.
+// #include "Internal/IQT_PriorityQueueInternal.h" 
+DEFINE_LOG_CATEGORY(LogIOTQueue);
+
+
+
+UIQT_Queue::UIQT_Queue()
+    : EnqueueMode(EIQT_QueueMode::PriorityOrder) 
+    , bIgnoreDuplicatesOnEnqueue(true)          
+    , MaxQueueSize(0)                           
+    , NextFIFOPriorityCounter(0)                
+    , NextFILOPriorityCounter(TNumericLimits<int32>::Max()) 
+{
+    // A alocação da InternalQueue ainda ocorre aqui, mas a definição completa
+    // de UIQT_PriorityQueueInternal já é conhecida devido ao include em IQT_Queue.h
+    InternalQueue = MakeUnique<UIQT_PriorityQueueInternal>();
+    InternalQueue->Init(); 
+}
+
+// Definição explícita do destrutor para resolver o erro C4150 (TUniquePtr incomplete type)
+// A implementação vazia é suficiente, pois o TUniquePtr gerencia a memória.
+UIQT_Queue::~UIQT_Queue()
+{
+    // O TUniquePtr cuidará da desalocação da InternalQueue automaticamente
+    // quando o UIQT_Queue for destruído.
+    // Não é necessário chamar InternalQueue.Reset() aqui, a menos que haja
+    // uma lógica específica de desalocação antecipada que precise ser executada
+    // antes de BeginDestroy().
+}
+
+void UIQT_Queue::BeginDestroy()
+{
+    InternalQueue.Reset(); 
+    Super::BeginDestroy();
+}
+
+void UIQT_Queue::InitializeQueue()
+{
+    if (InternalQueue.IsValid())
+    {
+        InternalQueue->Init(); 
+        NextFIFOPriorityCounter = 0;
+        NextFILOPriorityCounter = TNumericLimits<int32>::Max();
+        UE_LOG(LogIOTQueue, Log, TEXT("UIQT_Queue: Fila inicializada e contadores resetados."));
+    }
+}
+
+bool UIQT_Queue::EnqueueItem(FIQT_QueueItem& ItemToEnqueue)
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada! Chame InitializeQueue primeiro."));
+        return false;
+    }
+
+    if (MaxQueueSize > 0 && InternalQueue->GetCount() >= MaxQueueSize)
+    {
+        UE_LOG(LogIOTQueue, Warning, TEXT("UIQT_Queue: Fila cheia (Max: %d). Item '%s' não enfileirado."), MaxQueueSize, *ItemToEnqueue.Name.ToString());
+        return false;
+    }
+
+    if (bIgnoreDuplicatesOnEnqueue && ContainsItem(ItemToEnqueue))
+    {
+        UE_LOG(LogIOTQueue, Log, TEXT("UIQT_Queue: Item '%s' já existe na fila e duplicatas são ignoradas."), *ItemToEnqueue.Name.ToString());
+        return false;
+    }
+
+    switch (EnqueueMode)
+    {
+        case EIQT_QueueMode::FIFO:
+            ItemToEnqueue.Priority = NextFIFOPriorityCounter++;
+            break;
+        case EIQT_QueueMode::FILO:
+            ItemToEnqueue.Priority = NextFILOPriorityCounter--;
+            break;
+        case EIQT_QueueMode::PriorityOrder:
+        default:
+            break;
+    }
+
+    TSharedPtr<FIQT_QueueItem> ItemPtr = MakeShared<FIQT_QueueItem>(ItemToEnqueue);
+    ItemPtr->bIsEnqueued = true; 
+    
+    bool bSuccess = InternalQueue->Enqueue(ItemPtr);
+    if (bSuccess)
+    {
+        UE_LOG(LogIOTQueue, Log , TEXT("UIQT_Queue: Enfileirado item '%s' com prioridade %d. Modo: %s."),
+            *ItemToEnqueue.Name.ToString(), ItemToEnqueue.Priority,
+            *UEnum::GetValueAsString(EnqueueMode));
+    }
+    return bSuccess;
+}
+
+bool UIQT_Queue::DequeueItem(FIQT_QueueItem& OutItem)
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada!"));
+        return false;
+    }
+
+    TSharedPtr<FIQT_QueueItem> DequeuedPtr = InternalQueue->Dequeue();
+    if (DequeuedPtr.IsValid())
+    {
+        OutItem = *DequeuedPtr; 
+        OutItem.bIsEnqueued = false; 
+        UE_LOG(LogIOTQueue, Log , TEXT("UIQT_Queue: Desenfileirado item '%s' com prioridade %d."),
+            *OutItem.Name.ToString(), OutItem.Priority);
+        return true;
+    }
+
+    UE_LOG(LogIOTQueue, Warning , TEXT("UIQT_Queue: Dequeued Pointer Invalido ou Lista Vazia, Item Vazio Retornado!"));
+    OutItem = FIQT_QueueItem(); 
+    return false;
+}
+
+bool UIQT_Queue::RemoveSpecificItem(FIQT_QueueItem& ItemToRemove)
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada!"));
+        return false;
+    }
+    TSharedPtr<FIQT_QueueItem> TempItemPtr = MakeShared<FIQT_QueueItem>(ItemToRemove);
+    bool bSuccess = InternalQueue->RemoveItem(TempItemPtr);
+    if (bSuccess)
+    {
+        UE_LOG(LogIOTQueue, Log, TEXT("UIQT_Queue: Item '%s' removido especificamente da fila."), *ItemToRemove.Name.ToString());
+    }
+    return bSuccess;
+}
+
+bool UIQT_Queue::ContainsItem(FIQT_QueueItem& ItemToCheck) const
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada!"));
+        return false;
+    }
+    TSharedPtr<FIQT_QueueItem> TempItemPtr = MakeShared<FIQT_QueueItem>(ItemToCheck); 
+    return InternalQueue->Contains(TempItemPtr);
+}
+
+int32 UIQT_Queue::GetQueueCount() const
+{
+    if (InternalQueue.IsValid())
+    {
+        return InternalQueue->GetCount();
+    }
+    return 0;
+}
+
+bool UIQT_Queue::IsQueueEmpty() const
+{
+    if (InternalQueue.IsValid())
+    {
+        return InternalQueue->IsEmpty();
+    }
+    return true;
+}
+
+void UIQT_Queue::EmptyQueue()
+{
+    if (InternalQueue.IsValid())
+    {
+        InternalQueue->Empty();
+        NextFIFOPriorityCounter = 0;
+        NextFILOPriorityCounter = TNumericLimits<int32>::Max();
+        UE_LOG(LogIOTQueue, Log, TEXT("UIQT_Queue: Fila esvaziada."));
+    }
+}
+
+int32 UIQT_Queue::GetNumOpenItems() const
+{
+    if (InternalQueue.IsValid())
+    {
+        return InternalQueue->GetNumOpen();
+    }
+    return 0;
+}
+
+int32 UIQT_Queue::GetNumClosedItems() const
+{
+    if (InternalQueue.IsValid())
+    {
+        return InternalQueue->GetNumClose();
+    }
+    return 0;
+}
+
+bool UIQT_Queue::ValidateQueueItemData(const FIQT_QueueItem& ItemToValidate) const
+{
+    if (InternalQueue.IsValid())
+    {
+        return InternalQueue->ValidateData(ItemToValidate);
+    }
+    return false; 
+}
+
+bool UIQT_Queue::FindItemByTaskID(const FGuid& TaskID, FIQT_QueueItem& OutItem) const
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada!"));
+        OutItem = FIQT_QueueItem(); 
+        return false;
+    }
+    TSharedPtr<FIQT_QueueItem> FoundItemPtr = InternalQueue->FindByTaskID(TaskID);
+    if (FoundItemPtr.IsValid())
+    {
+        OutItem = *FoundItemPtr;
+        return true;
+    }
+    OutItem = FIQT_QueueItem(); 
+    return false;
+}
+
+bool UIQT_Queue::FindItemByHashKey(FName InName, FGameplayTag InTag, bool bInIsOpen, FIQT_QueueItem& OutItem) const
+{
+    if (!InternalQueue.IsValid())
+    {
+        UE_LOG(LogIOTQueue, Error, TEXT("UIQT_Queue: Fila não inicializada!"));
+        OutItem = FIQT_QueueItem(); 
+        return false;
+    }
+    TSharedPtr<FIQT_QueueItem> FoundItemPtr = InternalQueue->FindByHashKey(InName, InTag, bInIsOpen);
+    if (FoundItemPtr.IsValid())
+    {
+        OutItem = *FoundItemPtr;
+        return true;
+    }
+    OutItem = FIQT_QueueItem(); 
+    return false;
+}
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT_Queue.cpp ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT_WaitForAction.cpp ---
+// IQT/Source/IQT/Private/IQT_WaitForAction.cpp
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#include "IQT_WaitForAction.h" 
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemGlobals.h" // Para UAbilitySystemGlobals::GetAbilitySystemComponentFromActor
+#include "Abilities/GameplayAbility.h"
+
+UIQT_WaitForAction::UIQT_WaitForAction(const FObjectInitializer& ObjectInitializer) 
+    : Super(ObjectInitializer)
+    , bUseExternalTarget(false)
+    , bOnlyTriggerOnce(false)
+    , bOnlyMatchExact(true)
+{
+    // Constructor logic, if any.
+}
+
+UIQT_WaitForAction* UIQT_WaitForAction::IQT_WaitActionEvent(UGameplayAbility* OwningAbility, 
+    FGameplayTag InSuccessTag,
+    FGameplayTag InFailTag,
+    AActor* InOptionalExternalTarget,
+    bool InOnlyTriggerOnce,
+    bool InOnlyMatchExact)
+{
+    UIQT_WaitForAction* MyObj = NewAbilityTask<UIQT_WaitForAction>(OwningAbility); 
+
+    MyObj->SuccessTag = InSuccessTag;
+    MyObj->FailTag = InFailTag;
+    MyObj->bOnlyTriggerOnce = InOnlyTriggerOnce;
+    MyObj->bOnlyMatchExact = InOnlyMatchExact;
+
+    if (InOptionalExternalTarget)
+    {
+        MyObj->bUseExternalTarget = true;
+        MyObj->OptionalExternalTargetASC = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(InOptionalExternalTarget);
+    }
+
+    return MyObj;
+}
+
+UAbilitySystemComponent* UIQT_WaitForAction::GetTargetASC() const 
+{
+    if (bUseExternalTarget && OptionalExternalTargetASC.Get()) 
+    {
+        return OptionalExternalTargetASC.Get();
+    }
+    return AbilitySystemComponent.Get(); // Use ASC do OwningAbility por padr�o
+}
+
+void UIQT_WaitForAction::Activate() 
+{
+    UAbilitySystemComponent* TargetASC = GetTargetASC();
+    if (!TargetASC)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UIQT_WaitForAction: TargetASC is null, aborting task.")); 
+        EndTask();
+        return;
+    }
+
+    if (SuccessTag.IsValid())
+    {
+        if (bOnlyMatchExact)
+        {
+            // CORRE��O: GenericGameplayEventCallbacks com OnExactSuccessEvent (FGameplayEventData*)
+            SuccessHandle = TargetASC->GenericGameplayEventCallbacks.FindOrAdd(SuccessTag).AddUObject(this, &UIQT_WaitForAction::OnExactSuccessEvent);
+        }
+        else
+        {
+            // CORRE��O: AddGameplayEventTagContainerDelegate com OnContainerSuccessEvent (FGameplayTag, FGameplayEventData*)
+            SuccessHandle = TargetASC->AddGameplayEventTagContainerDelegate(FGameplayTagContainer(SuccessTag), FGameplayEventTagMulticastDelegate::FDelegate::CreateUObject(this, &UIQT_WaitForAction::OnContainerSuccessEvent));
+        }
+    }
+
+    if (FailTag.IsValid())
+    {
+        if (bOnlyMatchExact)
+        {
+            // CORRE��O: GenericGameplayEventCallbacks com OnExactFailEvent (FGameplayEventData*)
+            FailHandle = TargetASC->GenericGameplayEventCallbacks.FindOrAdd(FailTag).AddUObject(this, &UIQT_WaitForAction::OnExactFailEvent);
+        }
+        else
+        {
+            // CORRE��O: AddGameplayEventTagContainerDelegate com OnContainerFailEvent (FGameplayTag, FGameplayEventData*)
+            FailHandle = TargetASC->AddGameplayEventTagContainerDelegate(FGameplayTagContainer(FailTag), FGameplayEventTagMulticastDelegate::FDelegate::CreateUObject(this, &UIQT_WaitForAction::OnContainerFailEvent));
+        }
+    }
+
+    if (!SuccessTag.IsValid() && !FailTag.IsValid())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UIQT_WaitForAction: No valid SuccessTag or FailTag provided, task will never trigger. Ending task.")); 
+        EndTask();
+    }
+}
+
+// Implementa��es das novas fun��es de callback
+
+// Callback para correspond�ncia exata
+void UIQT_WaitForAction::OnExactSuccessEvent(const FGameplayEventData* Payload) 
+{
+    if (ShouldBroadcastAbilityTaskDelegates() && Payload)
+    {
+        // O payload j� vem como ponteiro, ent�o dereferenciamos para o Broadcast que espera por valor
+        SucessesfullAction.Broadcast(*Payload); 
+        if (bOnlyTriggerOnce)
+        {
+            EndTask();
+        }
+    }
+}
+
+// Callback para correspond�ncia de container
+void UIQT_WaitForAction::OnContainerSuccessEvent(FGameplayTag MatchedTag, const FGameplayEventData* Payload) 
+{
+    // A tag MatchedTag � a que efetivamente disparou o evento.
+    // Verificamos o Payload para garantir que n�o � nulo antes de usar.
+    if (ShouldBroadcastAbilityTaskDelegates() && Payload)
+    {
+        // O payload j� vem como ponteiro, ent�o dereferenciamos para o Broadcast que espera por valor
+        SucessesfullAction.Broadcast(*Payload); 
+        if (bOnlyTriggerOnce)
+        {
+            EndTask();
+        }
+    }
+}
+
+// Callback para correspond�ncia exata (falha)
+void UIQT_WaitForAction::OnExactFailEvent(const FGameplayEventData* Payload) 
+{
+    if (ShouldBroadcastAbilityTaskDelegates() && Payload)
+    {
+        FailedAction.Broadcast(*Payload);
+        if (bOnlyTriggerOnce)
+        {
+            EndTask();
+        }
+    }
+}
+
+// Callback para correspond�ncia de container (falha)
+void UIQT_WaitForAction::OnContainerFailEvent(FGameplayTag MatchedTag, const FGameplayEventData* Payload) 
+{
+    if (ShouldBroadcastAbilityTaskDelegates() && Payload)
+    {
+        FailedAction.Broadcast(*Payload);
+        if (bOnlyTriggerOnce)
+        {
+            EndTask();
+        }
+    }
+}
+
+void UIQT_WaitForAction::OnDestroy(bool AbilityEnding) 
+{
+    UAbilitySystemComponent* TargetASC = GetTargetASC();
+    
+    // CORRE��O: L�gica de remo��o de delegates baseada no modo de binding
+    if (TargetASC && SuccessHandle.IsValid())
+    {
+        if (bOnlyMatchExact)
+        {
+            // Remover para GenericGameplayEventCallbacks
+            TargetASC->GenericGameplayEventCallbacks.FindOrAdd(SuccessTag).Remove(SuccessHandle);
+        }
+        else
+        {
+            // Remover para AddGameplayEventTagContainerDelegate
+            TargetASC->RemoveGameplayEventTagContainerDelegate(FGameplayTagContainer(SuccessTag), SuccessHandle);
+        }
+    }
+
+    if (TargetASC && FailHandle.IsValid())
+    {
+        if (bOnlyMatchExact)
+        {
+            // Remover para GenericGameplayEventCallbacks
+            TargetASC->GenericGameplayEventCallbacks.FindOrAdd(FailTag).Remove(FailHandle);
+        }
+        else
+        {
+            // Remover para AddGameplayEventTagContainerDelegate
+            TargetASC->RemoveGameplayEventTagContainerDelegate(FGameplayTagContainer(FailTag), FailHandle);
+        }
+    }
+
+    Super::OnDestroy(AbilityEnding);
+}
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\IQT_WaitForAction.cpp ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_DynAINode.cpp ---
+// IQT/Source/IQT/Private/Internal/IQT_DynAINode.cpp
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#include "IQT_DynAINode.h" 
+
+UIQT_DynAINode::UIQT_DynAINode()
+    : pNextNode(nullptr)
+    , pPriorNode(nullptr)
+    , pFather(nullptr)
+    , AgentData(nullptr) 
+{}
+
+void UIQT_DynAINode::Init(TSharedPtr<FIQT_QueueItem>& InData)
+{
+    ResetNode();
+    AgentData = InData; 
+}
+
+void UIQT_DynAINode::ResetNode()
+{
+    AgentData   = nullptr;
+    pFather     = nullptr;
+    pNextNode   = nullptr;
+    pPriorNode  = nullptr;
+}
+
+void UIQT_DynAINode::SetPriority(int32 InPriority)
+{
+    if (AgentData.IsValid())
+    {
+        AgentData->Priority = InPriority;
+    }
+}
+
+int32 UIQT_DynAINode::GetPriority() const
+{
+    if (AgentData.IsValid())
+    {
+        return AgentData->Priority;
+    }
+    return 0; 
+}
+
+bool UIQT_DynAINode::operator==(const UIQT_DynAINode& Other) const
+{
+    if (!AgentData.IsValid() || !Other.AgentData.IsValid())
+    {
+        return !AgentData.IsValid() && !Other.AgentData.IsValid();
+    }
+    return (*AgentData) == (*Other.AgentData); 
+}
+
+bool UIQT_DynAINode::operator<(const UIQT_DynAINode& Other) const
+{
+    if (!AgentData.IsValid() || !Other.AgentData.IsValid())
+    {
+        return AgentData.IsValid() && !Other.AgentData.IsValid();
+    }
+    return (*AgentData) < (*Other.AgentData); 
+}
+
+bool UIQT_DynAINode::operator>(const UIQT_DynAINode& Other) const
+{
+    if (!AgentData.IsValid() || !Other.AgentData.IsValid())
+    {
+        return !AgentData.IsValid() && Other.AgentData.IsValid();
+    }
+    return (*AgentData) > (*Other.AgentData); 
+}
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_DynAINode.cpp ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_DynAINode.h ---
+// IQT/Source/IQT/Private/Internal/IQT_DynAINode.h
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "IQT_DataTypes.h" // Incluindo FIQT_DataTypes.h
+
+/**
+ * UIQT_DynAINode: Representa um nó na lista duplamente encadeada da fila de prioridade.
+ * Contém um TSharedPtr para os dados do item da fila (FIQT_QueueItem) e ponteiros para os nós vizinhos.
+ */
+class UIQT_DynAINode
+{
+public:
+    UIQT_DynAINode();
+
+    UIQT_DynAINode(const UIQT_DynAINode& Other) = default;
+    UIQT_DynAINode& operator=(const UIQT_DynAINode& Other) = default;
+
+    void Init(TSharedPtr<FIQT_QueueItem>& InData);
+
+    void ResetNode();
+
+    void SetPriority(int32 InPriority);
+    int32 GetPriority() const;
+
+    bool operator==(const UIQT_DynAINode& Other) const;
+    bool operator<(const UIQT_DynAINode& Other) const;
+    bool operator>(const UIQT_DynAINode& Other) const;
+
+public:
+    UIQT_DynAINode* pNextNode;  
+    UIQT_DynAINode* pPriorNode; 
+    UIQT_DynAINode* pFather;    
+
+    TSharedPtr<FIQT_QueueItem> AgentData;
+};
+
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_DynAINode.h ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_PriorityQueueInternal.cpp ---
+// IQT/Source/IQT/Private/Internal/IQT_PriorityQueueInternal.cpp
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#include "IQT_PriorityQueueInternal.h" 
+#include "IQT_DynAINode.h" // Incluído para garantir a definição completa de UIQT_DynAINode
+#include "Kismet/GameplayStatics.h" 
+
+// Construtor
+UIQT_PriorityQueueInternal::UIQT_PriorityQueueInternal()
+    : iQueueSize(0)
+    , iQueueMaxSize(300) 
+{
+    pHead = new UIQT_DynAINode();
+    pTail = new UIQT_DynAINode();
+
+    pHead->pNextNode = pTail;
+    pTail->pPriorNode = pHead;
+}
+
+// Destrutor
+UIQT_PriorityQueueInternal::~UIQT_PriorityQueueInternal()
+{
+    FScopeLock Lock(&Mutex); 
+    Empty();                 
+    delete pHead;            
+    delete pTail;
+    pHead = nullptr;
+    pTail = nullptr;
+}
+
+void UIQT_PriorityQueueInternal::Init()
+{
+    FScopeLock Lock(&Mutex); 
+    Empty(); 
+
+    if (!pHead) pHead = new UIQT_DynAINode();
+    if (!pTail) pTail = new UIQT_DynAINode();
+
+    pHead->pNextNode = pTail;
+    pTail->pPriorNode = pHead;
+    iQueueSize = 0;
+    VerificationList.Empty();
+}
+
+void UIQT_PriorityQueueInternal::Empty()
+{
+    FScopeLock Lock(&Mutex); 
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
+    {
+        UIQT_DynAINode* Next = Current->pNextNode;
+        delete Current; 
+        Current = Next;
+    }
+
+    pHead->pNextNode = pTail;
+    pTail->pPriorNode = pHead;
+    iQueueSize = 0;
+    VerificationList.Empty(); 
+}
+
+bool UIQT_PriorityQueueInternal::Enqueue(TSharedPtr<FIQT_QueueItem>& InData)
+{
+    FScopeLock Lock(&Mutex); 
+
+    if (!InData.IsValid() || !ValidateData(*InData))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal: Tentativa de enfileirar dados inválidos ou nulos."));
+        return false;
+    }
+
+    if (Contains(InData))
+    {
+        return false; 
+    }
+
+    if (iQueueSize >= iQueueMaxSize)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal: Fila atingiu o tamanho máximo (%d). Item '%s' não enfileirado."), iQueueMaxSize, *InData->Name.ToString());
+        return false; 
+    }
+
+    UIQT_DynAINode* NewNode = new UIQT_DynAINode();
+    NewNode->Init(InData); 
+
+    InsertNode(NewNode); 
+
+    VerificationList.AddUnique(*InData); 
+    iQueueSize++;
+    return true;
+}
+
+TSharedPtr<FIQT_QueueItem> UIQT_PriorityQueueInternal::Dequeue()
+{
+    FScopeLock Lock(&Mutex); 
+    if (iQueueSize == 0)
+    {
+        return nullptr; 
+    }
+
+    UIQT_DynAINode* NodeToRemove = pHead->pNextNode; 
+    TSharedPtr<FIQT_QueueItem> DequeuedData = NodeToRemove->AgentData; 
+
+    NodeToRemove->pPriorNode->pNextNode = NodeToRemove->pNextNode;
+    NodeToRemove->pNextNode->pPriorNode = NodeToRemove->pPriorNode;
+
+    delete NodeToRemove; 
+    NodeToRemove = nullptr; 
+
+    iQueueSize--;
+
+    if (DequeuedData.IsValid())
+    {
+        VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
+            return Item == *DequeuedData; 
+        });
+    }
+
+    return DequeuedData;
+}
+
+void UIQT_PriorityQueueInternal::InsertNode(UIQT_DynAINode* InNode)
+{
+    UIQT_DynAINode* Current = pHead;
+    while (Current->pNextNode != pTail && InNode->GetPriority() > Current->pNextNode->GetPriority())
+    {
+        Current = Current->pNextNode;
+    }
+
+    InNode->pNextNode = Current->pNextNode;
+    InNode->pPriorNode = Current;
+    Current->pNextNode->pPriorNode = InNode;
+    Current->pNextNode = InNode;
+}
+
+bool UIQT_PriorityQueueInternal::Contains(TSharedPtr<FIQT_QueueItem>& InData)
+{
+    FScopeLock Lock(&Mutex); 
+    if (!InData.IsValid()) return false;
+
+    for (const FIQT_QueueItem& ExistingItem : VerificationList)
+    {
+        if (ExistingItem == *InData) 
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool UIQT_PriorityQueueInternal::RemoveItem(TSharedPtr<FIQT_QueueItem>& ItemToRemove)
+{
+    FScopeLock Lock(&Mutex); 
+    if (!ItemToRemove.IsValid()) return false;
+
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
+    {
+        if (Current->AgentData.IsValid() && (*Current->AgentData) == (*ItemToRemove))
+        {
+            RemoveNode(Current);
+            iQueueSize--;
+
+            VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
+                return Item == *ItemToRemove;
+            });
+
+            return true;
+        }
+        Current = Current->pNextNode;
+    }
+    return false; 
+}
+
+void UIQT_PriorityQueueInternal::RemoveNode(UIQT_DynAINode* InNode)
+{
+    if (!InNode || InNode == pHead || InNode == pTail)
+    {
+        return; 
+    }
+
+    InNode->pPriorNode->pNextNode = InNode->pNextNode;
+    InNode->pNextNode->pPriorNode = InNode->pPriorNode;
+
+    delete InNode;
+}
+
+bool UIQT_PriorityQueueInternal::ValidateData(const FIQT_QueueItem& InData) const
+{
+    if (InData.Name.IsNone()) return false;
+    if (!InData.AbilityTriggerTag.IsValid()) return false; 
+    
+    return true;
+}
+
+TSharedPtr<FIQT_QueueItem> UIQT_PriorityQueueInternal::FindByTaskID(const FGuid& TaskID)
+{
+    FScopeLock Lock(&Mutex); 
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
+    {
+        if (Current->AgentData.IsValid() && Current->AgentData->TaskID == TaskID)
+        {
+            return Current->AgentData;
+        }
+        Current = Current->pNextNode;
+    }
+    return nullptr;
+}
+
+TSharedPtr<FIQT_QueueItem> UIQT_PriorityQueueInternal::FindByHashKey(FName InName, FGameplayTag InTag, bool bInIsOpen)
+{
+    FScopeLock Lock(&Mutex); 
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
+    {
+        if (Current->AgentData.IsValid() && 
+            Current->AgentData->Name == InName &&
+            Current->AgentData->AbilityTriggerTag.MatchesTagExact(InTag) &&
+            Current->AgentData->bIsOpen == bInIsOpen)
+        {
+            return Current->AgentData;
+        }
+        Current = Current->pNextNode;
+    }
+    return nullptr;
+}
+
+void UIQT_PriorityQueueInternal::SetMaxSize(int32 NewSize)
+{
+    FScopeLock Lock(&Mutex); 
+    if (NewSize > 0)
+    {
+        iQueueMaxSize = NewSize;
+    }
+}
+
+int32 UIQT_PriorityQueueInternal::GetMaxSize() const
+{
+    FScopeLock Lock(&Mutex); 
+    return iQueueMaxSize;
+}
+
+int32 UIQT_PriorityQueueInternal::GetCount() const
+{
+    FScopeLock Lock(&Mutex); 
+    return iQueueSize;
+}
+
+int32 UIQT_PriorityQueueInternal::GetNumOpen() const
+{
+    FScopeLock Lock(&Mutex); 
+    int32 Count = 0;
+    for (const FIQT_QueueItem& Item : VerificationList)
+    {
+        if (Item.bIsOpen)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+int32 UIQT_PriorityQueueInternal::GetNumClose() const
+{
+    FScopeLock Lock(&Mutex); 
+    int32 Count = 0;
+    for (const FIQT_QueueItem& Item : VerificationList)
+    {
+        if (!Item.bIsOpen)
+        {
+            Count++;
+        }
+    }
+    return Count;
+}
+
+bool UIQT_PriorityQueueInternal::IsEmpty() const
+{
+    FScopeLock Lock(&Mutex); 
+    return iQueueSize == 0;
+}
+
+void UIQT_PriorityQueueInternal::DumpVerificationList() const
+{
+    FScopeLock Lock(&Mutex); 
+    UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Command Filter Keys (Verification List)"));
+    UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - ============================================================="));
+
+    for (int i = 0; i < VerificationList.Num(); i++)
+    {
+        const FIQT_QueueItem& Item = VerificationList[i];
+        if (ValidateData(Item))
+        {
+            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Name=%s | Tag=%s | IsOpen=%s | Priority=%d"),
+                i, *Item.Name.ToString(), *Item.AbilityTriggerTag.ToString(), Item.bIsOpen ? TEXT("true") : TEXT("false"), Item.Priority);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Dados inválidos."), i);
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - ============================================================="));
+}
+
+bool UIQT_PriorityQueueInternal::ValidateList() const
+{
+    // Removido const_cast: como Mutex é mutable, FSCOPE_LOCK agora aceita &Mutex diretamente em funções const.
+    // FScopeLock Lock(const_cast<FCriticalSection*>(&Mutex)); 
+    FScopeLock Lock(&Mutex); 
+    UIQT_DynAINode* Current = pHead;
+    int32 Count = 0;
+    while (Current != nullptr)
+    {
+        if (Current->pNextNode == nullptr && Current != pTail)
+        {
+            UE_LOG(LogTemp, Error, TEXT("UIQT_PriorityQueueInternal: Erro de validação da lista: Nó '%p' sem pNextNode antes do pTail."), Current);
+            return false;
+        }
+        if (Current->pNextNode && Current->pNextNode->pPriorNode != Current)
+        {
+            UE_LOG(LogTemp, Error, TEXT("UIQT_PriorityQueueInternal: Erro de validação da lista: Inconsistência de ponteiro duplo. Current->pNextNode->pPriorNode != Current."));
+            return false;
+        }
+        if (Current != pHead && Current != pTail)
+        {
+            Count++; 
+        }
+        Current = Current->pNextNode;
+    }
+    if (Count != iQueueSize)
+    {
+        UE_LOG(LogTemp, Error, TEXT("UIQT_PriorityQueueInternal: Erro de validação da lista: Contagem de nós difere do iQueueSize. Contado: %d, Esperado: %d"), Count, iQueueSize);
+        return false;
+    }
+    return true;
+}
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_PriorityQueueInternal.cpp ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_PriorityQueueInternal.h ---
+// IQT/Source/IQT/Private/Internal/IQT_PriorityQueueInternal.h
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "IQT_DynAINode.h" 
+#include "HAL/CriticalSection.h" 
+#include "IQT_DataTypes.h"       
+
+/**
+ * UIQT_PriorityQueueInternal: Implementa uma fila de prioridade usando uma lista duplamente encadeada.
+ * Esta fila é thread-safe e gerencia seus próprios nós internos.
+ */
+class UIQT_PriorityQueueInternal
+{
+public:
+    UIQT_PriorityQueueInternal();
+    ~UIQT_PriorityQueueInternal();
+
+    void Init();
+    void Empty();
+
+    bool Enqueue(TSharedPtr<FIQT_QueueItem>& InData);
+
+    TSharedPtr<FIQT_QueueItem> Dequeue();
+
+    bool Contains(TSharedPtr<FIQT_QueueItem>& InData);
+
+    bool RemoveItem(TSharedPtr<FIQT_QueueItem>& ItemToRemove);
+
+    bool ValidateData(const FIQT_QueueItem& InData) const;
+
+    TSharedPtr<FIQT_QueueItem> FindByTaskID(const FGuid& TaskID);
+    TSharedPtr<FIQT_QueueItem> FindByHashKey(FName InName, FGameplayTag InTag, bool bInIsOpen);
+
+    void SetMaxSize(int32 NewSize);
+    int32 GetMaxSize() const;
+
+    int32 GetCount() const;
+    int32 GetNumOpen() const;
+    int32 GetNumClose() const;
+
+    bool IsEmpty() const;
+
+    void DumpVerificationList() const;
+
+private:
+    mutable FCriticalSection Mutex;         // Adicionado 'mutable' para permitir o uso em funções const
+    int32 iQueueSize;               
+    int32 iQueueMaxSize;            
+    UIQT_DynAINode* pHead;         
+    UIQT_DynAINode* pTail;         
+
+    TArray<FIQT_QueueItem> VerificationList;
+
+    void InsertNode(UIQT_DynAINode* InNode);
+    void RemoveNode(UIQT_DynAINode* InNode);
+    bool ValidateList() const;
+};
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Private\Internal\IQT_PriorityQueueInternal.h ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_DataTypes.h ---
+// IQT/Source/IQT/Public/IQT_DataTypes.h
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameplayTags.h" 
+#include "IQT_DataTypes.generated.h" 
+
+// Enum para o modo de enfileiramento (para customização da fila)
+UENUM(BlueprintType)
+enum class EIQT_QueueMode : uint8
+{
+    PriorityOrder   UMETA(DisplayName = "Order By Priority"), // Ordenação baseada na propriedade Priority
+    FIFO            UMETA(DisplayName = "First In, First Out"), // Primeiro a entrar, primeiro a sair
+    FILO            UMETA(DisplayName = "First In, Last Out")   // Primeiro a entrar, último a sair
+};
+
+/**
+ * Estrutura de dados para um item na fila da IQT.
+ * Usado para encapsular os dados do agente ou da tarefa de AI.
+ */
+USTRUCT(BlueprintType)
+struct FIQT_QueueItem
+{
+    GENERATED_BODY()
+
+    // Nome descritivo ou identificador do item.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    FName Name;
+
+    // Tag de Gameplay para categorização ou identificação adicional, usada para TRIGERAR uma habilidade.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    FGameplayTag AbilityTriggerTag;
+
+    // Tag de Gameplay que será esperada para o FIM BEM-SUCEDIDO de uma habilidade/ação associada ao item.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    FGameplayTag AbilityEndTag;
+
+    // Tag de Gameplay que será esperada para o FIM COM FALHA de uma habilidade/ação associada ao item.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    FGameplayTag AbilityFailTag; // <-- NOVA TAG
+
+    // Flag para indicar o estado do item (aberto/fechado), conforme sua lógica de AI.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    bool bIsOpen; 
+
+    // Prioridade do item. Usado para filas de prioridade.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    int32 Priority;
+
+    // ID de tarefa único, útil para identificação e busca.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    FGuid TaskID;
+
+    // Flags de estado interno do item, conforme sua lógica.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    bool bIsEnqueued;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    bool bIsStacked;
+
+    // Payload genérico para o usuário armazenar qualquer UObject que desejar associar a este item da fila.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
+    UObject* UserPayload;
+
+    // Construtor padrão
+    FIQT_QueueItem()
+        : Name(NAME_None)
+        , AbilityTriggerTag(FGameplayTag())
+        , AbilityEndTag(FGameplayTag())
+        , AbilityFailTag(FGameplayTag()) // <-- INICIALIZAÇÃO DA NOVA TAG
+        , bIsOpen(false)
+        , Priority(0)
+        , TaskID(FGuid::NewGuid()) 
+        , bIsEnqueued(false)
+        , bIsStacked(false)
+        , UserPayload(nullptr)
+    {}
+
+    // Sobrecarga do operador de igualdade para comparação de itens
+    // NOTA: 'AbilityEndTag' e 'AbilityFailTag' não estão incluídas na comparação de igualdade,
+    // pois geralmente são tags de "resultado" ou "estado final" e não definem a unicidade fundamental do item na fila.
+    // A unicidade é baseada no Nome, AbilityTriggerTag e estado bIsOpen.
+    bool operator==(const FIQT_QueueItem& Other) const
+    {
+        return Name == Other.Name && AbilityTriggerTag.MatchesTagExact(Other.AbilityTriggerTag) && bIsOpen == Other.bIsOpen;
+    }
+
+    // Sobrecarga dos operadores de comparação para ordenar a fila por prioridade
+    bool operator<(const FIQT_QueueItem& Other) const
+    {
+        return Priority < Other.Priority;
+    }
+
+    bool operator>(const FIQT_QueueItem& Other) const
+    {
+        return Priority > Other.Priority;
+    }
+};
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_DataTypes.h ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_Queue.h ---
+// IQT/Source/IQT/Public/IQT_Queue.h
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h" 
+#include "IQT_DataTypes.h" 
+#include "Internal/IQT_PriorityQueueInternal.h" 
+#include "IQT_Queue.generated.h" 
+
+DECLARE_LOG_CATEGORY_EXTERN(LogIOTQueue, Log, All);
+/**
+ * UIQT_Queue: Componente Gerenciador de Fila de Prioridade para Unreal Engine.
+ * Este componente encapsula a lógica de fila C++ e a expõe para Blueprints.
+ * Oferece funcionalidades de enfileiramento, desenfileiramento, e configurações
+ * de comportamento (FIFO, FILO, prioridade, ignorar duplicados).
+ *
+ * Para usar: Adicione este componente a qualquer Actor em seu Blueprint ou C++.
+ */
+UCLASS(Blueprintable, BlueprintType, ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
+class IQT_API UIQT_Queue : public UActorComponent 
+{
+    GENERATED_BODY()
+
+public:
+    UIQT_Queue();
+    // Destrutor explicitamente declarado e definido fora da linha para resolver TUniquePtr com tipo completo
+    ~UIQT_Queue(); 
+    virtual void BeginDestroy() override; // Limpeza do objeto interno da fila
+
+    // --- Propriedades Configuráveis da Fila (Expostas no Blueprint) ---
+
+    // Define o modo de enfileiramento (Prioridade, FIFO, FILO).
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Queue Configuration")
+    EIQT_QueueMode EnqueueMode; 
+
+    // Se verdadeiro, elementos com Nome, Tag e bIsOpen idênticos não serão adicionados novamente.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Queue Configuration",
+              meta = (ToolTip = "If true, elements with matching Name, Tag, and IsOpen status will not be added if already present."))
+    bool bIgnoreDuplicatesOnEnqueue;
+
+    // Tamanho máximo que a fila pode atingir. Se for 0, não há limite de tamanho.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT Queue Configuration",
+              meta = (ClampMin = "0", ToolTip = "Maximum number of items the queue can hold. 0 means no limit."))
+    int32 MaxQueueSize;
+    
+    // --- Funções Expostas para Blueprint ---
+
+    /**
+     * Inicializa a fila. Deve ser chamada antes de qualquer operação de enfileiramento/desenfileiramento.
+     * Limpa qualquer estado anterior da fila.
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT Queue")
+    void InitializeQueue();
+
+    /**
+     * Adiciona um item à fila. O comportamento (prioridade, FIFO, FILO) depende do 'EnqueueMode'.
+     * @param ItemToEnqueue O item (FIQT_QueueItem) a ser adicionado.
+     * @return True se o item foi adicionado com sucesso, false caso contrário (ex: fila cheia, duplicado).
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT Queue", meta=(DisplayName="Enqueue Item", Keywords="add queue push"))
+    bool EnqueueItem(UPARAM(ref) FIQT_QueueItem& ItemToEnqueue); 
+
+    /**
+     * Remove e retorna o item de maior prioridade (ou o próximo em ordem FIFO/FILO) da fila.
+     * @param OutItem O item removido da fila. Será inválido se a fila estiver vazia.
+     * @return True se um item foi removido com sucesso, false se a fila estiver vazia.
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT Queue", meta=(DisplayName="Dequeue Item", Keywords="remove queue pop"))
+    bool DequeueItem(FIQT_QueueItem& OutItem); 
+
+    /**
+     * Remove um item específico da fila.
+     * @param ItemToRemove O item a ser removido (comparado por Nome, Tag, bIsOpen).
+     * @return True se o item foi encontrado e removido, false caso contrário.
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT Queue", meta=(DisplayName="Remove Specific Item", Keywords="remove queue delete"))
+    bool RemoveSpecificItem(UPARAM(ref) FIQT_QueueItem& ItemToRemove); 
+
+    /**
+     * Verifica se a fila contém um item específico (comparado por Nome, Tag, bIsOpen).
+     * @param ItemToCheck O item a ser verificado.
+     * @return True se o item estiver na fila, false caso contrário.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue", meta=(DisplayName="Contains Item", Keywords="queue check exists"))
+    bool ContainsItem(UPARAM(ref) FIQT_QueueItem& ItemToCheck) const; 
+
+    /**
+     * Retorna o número atual de itens na fila.
+     * @return A contagem de itens na fila.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue", meta=(DisplayName="Get Queue Count", Keywords="queue size count length"))
+    int32 GetQueueCount() const;
+
+    /**
+     * Verifica se a fila está vazia.
+     * @return True se a fila não contém itens, false caso contrário.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue", meta=(DisplayName="Is Queue Empty?", Keywords="queue empty check"))
+    bool IsQueueEmpty() const;
+
+    /**
+     * Esvazia completamente a fila, removendo todos os itens.
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT Queue", meta=(DisplayName="Empty Queue", Keywords="clear queue reset"))
+    void EmptyQueue();
+
+    /**
+     * Retorna o número de itens na fila marcados como "abertos" (bIsOpen = true).
+     * @return A contagem de itens abertos.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue|Stats", meta=(DisplayName="Get Number of Open Items", Keywords="queue open count"))
+    int32 GetNumOpenItems() const;
+
+    /**
+     * Retorna o número de itens na fila marcados como "fechados" (bIsOpen = false).
+     * @return A contagem de itens fechados.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue|Stats", meta=(DisplayName="Get Number of Closed Items", Keywords="queue closed count"))
+    int32 GetNumClosedItems() const;
+
+    /**
+     * Valida os dados de um FIQT_QueueItem para garantir que estejam em um formato aceitável para a fila.
+     * @param ItemToValidate O item a ser validado.
+     * @return True se o item é considerado válido, false caso contrário.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue", meta=(DisplayName="Validate Queue Item Data", ToolTip="Checks if the provided item data is valid for enqueueing (e.g., Name is not None)."))
+    bool ValidateQueueItemData(UPARAM(ref) const FIQT_QueueItem& ItemToValidate) const; 
+
+    /**
+     * Busca um item na fila pelo seu TaskID.
+     * @param TaskID O GUID da tarefa a ser buscada.
+     * @param OutItem O item encontrado, se houver. Será um item padrão se não encontrado.
+     * @return True se um item com o TaskID especificado foi encontrado, false caso contrário.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue|Search", meta=(DisplayName="Find Item by Task ID", Keywords="queue search find TaskID"))
+    bool FindItemByTaskID(const FGuid& TaskID, FIQT_QueueItem& OutItem) const; 
+
+    /**
+     * Busca um item na fila por sua "chave hash" (Nome, Tag, bIsOpen).
+     * @param InName Nome do item.
+     * @param InTag Tag de Gameplay do item.
+     * @param bInIsOpen Estado de abertura do item.
+     * @param OutItem O item encontrado, se houver. Será um item padrão se não encontrado.
+     * @return True se um item com a chave especificada foi encontrado, false caso contrário.
+     */
+    UFUNCTION(BlueprintPure, Category = "IQT Queue|Search", meta=(DisplayName="Find Item by Hash Key", Keywords="queue search find hash key"))
+    bool FindItemByHashKey(FName InName, FGameplayTag InTag, bool bInIsOpen, FIQT_QueueItem& OutItem) const; 
+
+
+private:
+    TUniquePtr<UIQT_PriorityQueueInternal> InternalQueue; 
+
+    mutable int32 NextFIFOPriorityCounter;
+    mutable int32 NextFILOPriorityCounter; 
+};
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_Queue.h ---
+
+
+
+--- INÃCIO DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_WaitForAction.h ---
+// IQT/Source/IQT/Public/IQT_WaitForAction.h
+// -------------------------------------------------------------------------------
+// Copyright 2025 William Wolff. All Rights Reserved.
+// This code is property of William Wolff and protected by copyright law.
+// -------------------------------------------------------------------------------
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Abilities/Tasks/AbilityTask.h"
+#include "UObject/ObjectMacros.h"
+#include "GameplayTagContainer.h"
+#include "Abilities/GameplayAbilityTypes.h"
+#include "AbilitySystemComponent.h" // Necess�rio para FGameplayEventTagDelegate (para o delegate de broadcast)
+#include "IQT_WaitForAction.generated.h" 
+
+class UAbilitySystemComponent;
+
+// Delegates
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FWaitActionEventDelegate, FGameplayEventData, Payload);
+
+/**
+ * UIQT_WaitForAction: Uma AbilityTask que espera por eventos de Gameplay Tag.
+ * Permite que uma Gameplay Ability pause sua execu��o at� que uma tag de sucesso ou falha seja emitida.
+ */
+UCLASS()
+class IQT_API UIQT_WaitForAction : public UAbilityTask 
+{
+    GENERATED_UCLASS_BODY()
+
+public:
+    UPROPERTY(BlueprintAssignable)
+    FWaitActionEventDelegate SucessesfullAction;
+
+    UPROPERTY(BlueprintAssignable)
+    FWaitActionEventDelegate FailedAction;
+
+    /**
+     * Espera at� que o evento de gameplay tag especificado seja acionado.
+     * Por padr�o, verificar� o dono desta habilidade. O OptionalExternalTarget pode ser usado para monitorar outro ator.
+     * Continuar� ouvindo enquanto OnlyTriggerOnce = false.
+     * Se OnlyMatchExact = false, acionar� para tags aninhadas (filhas).
+     *
+     * @param OwningAbility A habilidade que est� esperando.
+     * @param SuccessTag A tag que, se emitida, acionar� o sucesso.
+     * @param FailTag A tag que, se emitida, acionar� a falha.
+     * @param OptionalExternalTarget O ator cujo AbilitySystemComponent ser� monitorado, se diferente do OwningAbility.
+     * @param OnlyTriggerOnce Se verdadeiro, a task ser� encerrada ap�s a primeira ocorr�ncia de sucesso ou falha.
+     * @param OnlyMatchExact Se verdadeiro, a tag do evento deve corresponder exatamente. Se falso, tags aninhadas tamb�m acionar�o.
+     */
+    UFUNCTION(BlueprintCallable, Category = "IQT|Ability|Tasks", meta = (HidePin = "OwningAbility", DefaultToSelf = "OwningAbility", BlueprintInternalUseOnly = "TRUE"))
+    static UIQT_WaitForAction* IQT_WaitActionEvent(UGameplayAbility* OwningAbility, 
+        FGameplayTag SuccessTag,
+        FGameplayTag FailTag,
+        AActor* OptionalExternalTarget = nullptr,
+        bool OnlyTriggerOnce = false,
+        bool OnlyMatchExact = true);
+
+    // Helpers
+    UAbilitySystemComponent* GetTargetASC() const;
+
+    // Overrides
+    virtual void Activate() override;
+    virtual void OnDestroy(bool AbilityEnding) override;
+
+protected:
+    // Tags que estamos esperando
+    FGameplayTag SuccessTag;
+    FGameplayTag FailTag;
+
+    UPROPERTY()
+    TObjectPtr<UAbilitySystemComponent> OptionalExternalTargetASC; 
+
+    bool bUseExternalTarget;
+    bool bOnlyTriggerOnce;
+    bool bOnlyMatchExact;
+
+    // Handles para as liga��es de delegate
+    FDelegateHandle SuccessHandle;
+    FDelegateHandle FailHandle;
+
+    // Callbacks para os eventos - Assinaturas AGORA CORRETAS
+    // Para bOnlyMatchExact == true (GenericGameplayEventCallbacks)
+    void OnExactSuccessEvent(const FGameplayEventData* Payload);
+    void OnExactFailEvent(const FGameplayEventData* Payload);
+
+    // Para bOnlyMatchExact == false (AddGameplayEventTagContainerDelegate)
+    void OnContainerSuccessEvent(FGameplayTag MatchedTag, const FGameplayEventData* Payload);
+    void OnContainerFailEvent(FGameplayTag MatchedTag, const FGameplayEventData* Payload);
+};
+
+--- FIM DO ARQUIVO: D:\william\UnrealProjects\IACSWorld\Plugins\IQT\Source\IQT\Public\IQT_WaitForAction.h ---
+
+
+

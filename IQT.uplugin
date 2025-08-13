@@ -1,0 +1,31 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "IQT - Insane Queue Tool",
+  "Description": "A custom priority queue tool for Unreal Engine, optimized for AI and game logic.",
+  "Category": "AI",
+  "CreatedBy": "William Wolff",
+  "CreatedByURL": "http://insaneframework.com",
+  "DocsURL": "http://insaneframework.com/docs",
+  "MarketplaceURL": "com.epicgames.launcher://ue/Fab/product/f2819d2f-5645-44cb-a5d3-1f458c33fe40",
+  "SupportURL": "http://insaneframework.com",
+  "CanContainContent": true,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "IQT",
+      "Type": "Runtime",
+      "LoadingPhase": "Default",
+      "PlatformAllowList": [
+        "Win64",
+        "Mac",
+        "Linux",
+        "Android",
+        "IOS"
+      ]
+    }
+  ]
+}
