@@ -22,19 +22,8 @@ UIQT_Queue::UIQT_Queue()
 {
     // A alocação da InternalQueue ainda ocorre aqui, mas a definição completa
     // de UIQT_PriorityQueueInternal já é conhecida devido ao include em IQT_Queue.h
-    InternalQueue = MakeUnique<UIQT_PriorityQueueInternal>();
+    InternalQueue = MakeShared<UIQT_PriorityQueueInternal>();
     InternalQueue->Init(); 
-}
-
-// Definição explícita do destrutor para resolver o erro C4150 (TUniquePtr incomplete type)
-// A implementação vazia é suficiente, pois o TUniquePtr gerencia a memória.
-UIQT_Queue::~UIQT_Queue() 
-{
-    // O TUniquePtr cuidará da desalocação da InternalQueue automaticamente
-    // quando o UIQT_Queue for destruído.
-    // Não é necessário chamar InternalQueue.Reset() aqui, a menos que haja
-    // uma lógica específica de desalocação antecipada que precise ser executada
-    // antes de BeginDestroy().
 }
 
 void UIQT_Queue::BeginDestroy()
