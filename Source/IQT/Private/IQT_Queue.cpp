@@ -28,7 +28,7 @@ UIQT_Queue::UIQT_Queue()
 
 // Definição explícita do destrutor para resolver o erro C4150 (TUniquePtr incomplete type)
 // A implementação vazia é suficiente, pois o TUniquePtr gerencia a memória.
-UIQT_Queue::~UIQT_Queue()
+UIQT_Queue::~UIQT_Queue() 
 {
     // O TUniquePtr cuidará da desalocação da InternalQueue automaticamente
     // quando o UIQT_Queue for destruído.

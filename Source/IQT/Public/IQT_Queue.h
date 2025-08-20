@@ -31,7 +31,7 @@ class IQT_API UIQT_Queue : public UActorComponent
 public:
     UIQT_Queue();
     // Destrutor explicitamente declarado e definido fora da linha para resolver TUniquePtr com tipo completo
-    ~UIQT_Queue(); 
+    virtual ~UIQT_Queue(); 
     virtual void BeginDestroy() override; // Limpeza do objeto interno da fila
 
     // --- Propriedades Configuráveis da Fila (Expostas no Blueprint) ---
