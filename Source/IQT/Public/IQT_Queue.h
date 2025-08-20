@@ -9,8 +9,10 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h" 
 #include "IQT_DataTypes.h" 
-#include "Internal/IQT_PriorityQueueInternal.h" 
+
 #include "IQT_Queue.generated.h" 
+
+class UIQT_PriorityQueueInternal; 
 
 DECLARE_LOG_CATEGORY_EXTERN(LogIOTQueue, Log, All);
 /**

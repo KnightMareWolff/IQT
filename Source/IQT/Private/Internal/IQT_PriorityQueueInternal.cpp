@@ -5,7 +5,7 @@
 // -------------------------------------------------------------------------------
 
 #include "IQT_PriorityQueueInternal.h" 
-#include "IQT_DynAINode.h" // Incluído para garantir a definição completa de UIQT_DynAINode
+#include "IQT_DynAINode.h" 
 #include "Kismet/GameplayStatics.h" 
 
 // Construtor
@@ -42,7 +42,7 @@ void UIQT_PriorityQueueInternal::Init()
     pHead->pNextNode = pTail;
     pTail->pPriorNode = pHead;
     iQueueSize = 0;
-    VerificationList.Empty();
+    // VerificationList.Empty(); // Removido
 }
 
 void UIQT_PriorityQueueInternal::Empty()
@@ -59,7 +59,7 @@ void UIQT_PriorityQueueInternal::Empty()
     pHead->pNextNode = pTail;
     pTail->pPriorNode = pHead;
     iQueueSize = 0;
-    VerificationList.Empty(); 
+    // VerificationList.Empty(); // Removido
 }
 
 bool UIQT_PriorityQueueInternal::Enqueue(TSharedPtr<FIQT_QueueItem>& InData)
@@ -72,10 +72,11 @@ bool UIQT_PriorityQueueInternal::Enqueue(TSharedPtr<FIQT_QueueItem>& InData)
         return false;
     }
 
-    if (Contains(InData))
-    {
-        return false; 
-    }
+    // REMOVIDO: A checagem de duplicidade agora é responsabilidade exclusiva do UIQT_Queue.
+    // if (Contains(InData))
+    // {
+    //     return false; 
+    // }
 
     if (iQueueSize >= iQueueMaxSize)
     {
@@ -88,7 +89,9 @@ bool UIQT_PriorityQueueInternal::Enqueue(TSharedPtr<FIQT_QueueItem>& InData)
 
     InsertNode(NewNode); 
 
-    VerificationList.AddUnique(*InData); 
+    // REMOVIDO: Não há mais VerificationList.
+    // VerificationList.AddUnique(*InData); 
+
     iQueueSize++;
     return true;
 }
@@ -112,12 +115,13 @@ TSharedPtr<FIQT_QueueItem> UIQT_PriorityQueueInternal::Dequeue()
 
     iQueueSize--;
 
-    if (DequeuedData.IsValid())
-    {
-        VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
-            return Item == *DequeuedData; 
-        });
-    }
+    // REMOVIDO: Não há mais VerificationList para atualizar.
+    // if (DequeuedData.IsValid())
+    // {
+    //     VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
+    //         return Item == *DequeuedData; 
+    //     });
+    // }
 
     return DequeuedData;
 }
@@ -141,12 +145,15 @@ bool UIQT_PriorityQueueInternal::Contains(TSharedPtr<FIQT_QueueItem>& InData)
     FScopeLock Lock(&Mutex); 
     if (!InData.IsValid()) return false;
 
-    for (const FIQT_QueueItem& ExistingItem : VerificationList)
+    // NOVO: Itera a lista encadeada diretamente para verificar a existência.
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
     {
-        if (ExistingItem == *InData) 
+        if (Current->AgentData.IsValid() && (*Current->AgentData) == (*InData))
         {
             return true;
         }
+        Current = Current->pNextNode;
     }
     return false;
 }
@@ -164,9 +171,10 @@ bool UIQT_PriorityQueueInternal::RemoveItem(TSharedPtr<FIQT_QueueItem>& ItemToRe
             RemoveNode(Current);
             iQueueSize--;
 
-            VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
-                return Item == *ItemToRemove;
-            });
+            // REMOVIDO: Não há mais VerificationList para atualizar.
+            // VerificationList.RemoveAll([&](const FIQT_QueueItem& Item) {
+            //     return Item == *ItemToRemove;
+            // });
 
             return true;
         }
@@ -191,7 +199,7 @@ void UIQT_PriorityQueueInternal::RemoveNode(UIQT_DynAINode* InNode)
 bool UIQT_PriorityQueueInternal::ValidateData(const FIQT_QueueItem& InData) const
 {
     if (InData.Name.IsNone()) return false;
-    if (!InData.AbilityTriggerTag.IsValid()) return false; 
+    if (!InData.AbilityTriggerTag.IsValid()) return false;
     
     return true;
 }
@@ -254,12 +262,15 @@ int32 UIQT_PriorityQueueInternal::GetNumOpen() const
 {
     FScopeLock Lock(&Mutex); 
     int32 Count = 0;
-    for (const FIQT_QueueItem& Item : VerificationList)
+    // NOVO: Itera a lista encadeada diretamente para contar itens abertos.
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
     {
-        if (Item.bIsOpen)
+        if (Current->AgentData.IsValid() && Current->AgentData->bIsOpen)
         {
             Count++;
         }
+        Current = Current->pNextNode;
     }
     return Count;
 }
@@ -268,12 +279,15 @@ int32 UIQT_PriorityQueueInternal::GetNumClose() const
 {
     FScopeLock Lock(&Mutex); 
     int32 Count = 0;
-    for (const FIQT_QueueItem& Item : VerificationList)
+    // NOVO: Itera a lista encadeada diretamente para contar itens fechados.
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    while (Current != pTail)
     {
-        if (!Item.bIsOpen)
+        if (Current->AgentData.IsValid() && !Current->AgentData->bIsOpen)
         {
             Count++;
         }
+        Current = Current->pNextNode;
     }
     return Count;
 }
@@ -284,32 +298,36 @@ bool UIQT_PriorityQueueInternal::IsEmpty() const
     return iQueueSize == 0;
 }
 
-void UIQT_PriorityQueueInternal::DumpVerificationList() const
+// RENOMEADO e MODIFICADO para despejar o conteúdo real da fila, não uma lista de verificação separada.
+void UIQT_PriorityQueueInternal::DumpQueueContents() const
 {
     FScopeLock Lock(&Mutex); 
-    UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Command Filter Keys (Verification List)"));
+    UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Conteúdo Atual da Fila"));
     UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - ============================================================="));
 
-    for (int i = 0; i < VerificationList.Num(); i++)
+    UIQT_DynAINode* Current = pHead->pNextNode;
+    int32 Index = 0;
+    while (Current != pTail)
     {
-        const FIQT_QueueItem& Item = VerificationList[i];
-        if (ValidateData(Item))
+        if (Current->AgentData.IsValid() && ValidateData(*Current->AgentData))
         {
-            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Name=%s | Tag=%s | IsOpen=%s | Priority=%d"),
-                i, *Item.Name.ToString(), *Item.AbilityTriggerTag.ToString(), Item.bIsOpen ? TEXT("true") : TEXT("false"), Item.Priority);
+            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Name=%s | Tag=%s | IsOpen=%s | Priority=%d | TaskID=%s"),
+                Index, *Current->AgentData->Name.ToString(), *Current->AgentData->AbilityTriggerTag.ToString(), 
+                Current->AgentData->bIsOpen ? TEXT("true") : TEXT("false"), Current->AgentData->Priority, 
+                *Current->AgentData->TaskID.ToString());
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Dados inválidos."), i);
+            UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - Item %d: Dados inválidos no nó."), Index);
         }
+        Current = Current->pNextNode;
+        Index++;
     }
     UE_LOG(LogTemp, Warning, TEXT("UIQT_PriorityQueueInternal - ============================================================="));
 }
 
 bool UIQT_PriorityQueueInternal::ValidateList() const
 {
-    // Removido const_cast: como Mutex é mutable, FSCOPE_LOCK agora aceita &Mutex diretamente em funções const.
-    // FScopeLock Lock(const_cast<FCriticalSection*>(&Mutex)); 
     FScopeLock Lock(&Mutex); 
     UIQT_DynAINode* Current = pHead;
     int32 Count = 0;

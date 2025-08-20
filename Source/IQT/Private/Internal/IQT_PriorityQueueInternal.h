@@ -28,7 +28,8 @@ public:
 
     TSharedPtr<FIQT_QueueItem> Dequeue();
 
-    bool Contains(TSharedPtr<FIQT_QueueItem>& InData);
+    // Renomeado e atualizado para iterar a lista encadeada.
+    bool Contains(TSharedPtr<FIQT_QueueItem>& InData); 
 
     bool RemoveItem(TSharedPtr<FIQT_QueueItem>& ItemToRemove);
 
@@ -46,7 +47,8 @@ public:
 
     bool IsEmpty() const;
 
-    void DumpVerificationList() const;
+    // Renomeado para clareza, pois agora ele despeja o conteúdo real da fila.
+    void DumpQueueContents() const; 
 
 private:
     mutable FCriticalSection Mutex;         // Adicionado 'mutable' para permitir o uso em funções const
@@ -55,7 +57,7 @@ private:
     UIQT_DynAINode* pHead;         
     UIQT_DynAINode* pTail;         
 
-    TArray<FIQT_QueueItem> VerificationList;
+    // TArray<FIQT_QueueItem> VerificationList; // REMOVIDO: Não é mais necessário para esta implementação.
 
     void InsertNode(UIQT_DynAINode* InNode);
     void RemoveNode(UIQT_DynAINode* InNode);

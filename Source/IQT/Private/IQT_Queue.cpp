@@ -5,6 +5,7 @@
 // -------------------------------------------------------------------------------
 
 #include "IQT_Queue.h" 
+#include "Internal/IQT_PriorityQueueInternal.h" 
 // NOTA: "Internal/IQT_PriorityQueueInternal.h" AGORA É INCLUÍDO DIRETAMENTE EM "IQT_Queue.h" para resolver o TUniquePtr
 // A linha abaixo foi comentada pois o include já está no .h do UIQT_Queue.
 // #include "Internal/IQT_PriorityQueueInternal.h" 

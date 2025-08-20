@@ -8,6 +8,9 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTags.h" 
+#include "Abilities/GameplayAbilityTypes.h" // Inclui FGameplayEventData
+#include "GameFramework/Actor.h" // Inclui AActor
+
 #include "IQT_DataTypes.generated.h" 
 
 // Enum para o modo de enfileiramento (para customização da fila)
@@ -42,7 +45,7 @@ struct FIQT_QueueItem
 
     // Tag de Gameplay que será esperada para o FIM COM FALHA de uma habilidade/ação associada ao item.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
-    FGameplayTag AbilityFailTag; // <-- NOVA TAG
+    FGameplayTag AbilityFailTag; 
 
     // Flag para indicar o estado do item (aberto/fechado), conforme sua lógica de AI.
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Queue Item")
@@ -72,7 +75,7 @@ struct FIQT_QueueItem
         : Name(NAME_None)
         , AbilityTriggerTag(FGameplayTag())
         , AbilityEndTag(FGameplayTag())
-        , AbilityFailTag(FGameplayTag()) // <-- INICIALIZAÇÃO DA NOVA TAG
+        , AbilityFailTag(FGameplayTag())
         , bIsOpen(false)
         , Priority(0)
         , TaskID(FGuid::NewGuid()) 
@@ -100,4 +103,40 @@ struct FIQT_QueueItem
     {
         return Priority > Other.Priority;
     }
+};
+
+/**
+ * Estrutura para encapsular todos os dados necessários para DISPARAR um evento de gameplay.
+ * É criada pela UIQT_WaitForAction para facilitar o uso externo.
+ */
+USTRUCT(BlueprintType)
+struct FIQT_TriggerData
+{
+    GENERATED_BODY()
+
+    // A tag principal que deve ser usada para disparar o evento.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Trigger Data")
+    FGameplayTag TriggerTag;
+
+    // O payload completo (FGameplayEventData) pré-preenchido para o disparo do evento.
+    // Inclui Instigator, Target, EventTag (que é a TriggerTag) e OptionalObject.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Trigger Data")
+    FGameplayEventData Payload;
+
+    // Referência direta ao ator que deve receber o evento (o Target do Payload).
+    // Útil para chamadas como SendGameplayEventToActor.
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IQT|Trigger Data")
+    AActor* EventTargetActor;
+
+    FIQT_TriggerData()
+        : TriggerTag(FGameplayTag())
+        , Payload(FGameplayEventData())
+        , EventTargetActor(nullptr)
+    {}
+
+    // REMOVIDO: Sobrecarga do operador de igualdade para comparação, pois FGameplayEventData não tem um operator==.
+    // bool operator==(const FIQT_TriggerData& Other) const
+    // {
+    //     return TriggerTag == Other.TriggerTag && Payload == Other.Payload && EventTargetActor == Other.EventTargetActor;
+    // }
 };
